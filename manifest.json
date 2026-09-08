@@ -1,0 +1,16 @@
+{
+  "name": "Trione-Annadel 3D Map",
+  "short_name": "Annadel 3D",
+  "description": "3D Topographical Map with LiDAR Forest Canopy & 27 Official Trails",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0b0f14",
+  "theme_color": "#0b0f14",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}
