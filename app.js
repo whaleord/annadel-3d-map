@@ -13,14 +13,26 @@
   const texturesData = data.textures;
   const bounds = terrainData.bounds;
 
+  function decodeBase64(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes.buffer;
+  }
+
   // Ground dimensions (Aspect ratio matching real geographic distances)
   const MAP_WIDTH = 100.0;
   const MAP_DEPTH = 89.1;
   const RES = terrainData.grid_res;
   const MIN_ELEV_M = terrainData.min_elevation_m;
   const MAX_ELEV_M = terrainData.max_elevation_m;
-  const ELEV_SPAN_M = MAX_ELEV_M - MIN_ELEV_M;
   const GROUND_WIDTH_M = 8720.0; // Ground width in meters
+  const WORLD_PER_M = MAP_WIDTH / GROUND_WIDTH_M;
+
+  // LiDAR bare-earth grid, stored as uint16 decimetres, row-major from the north-west corner
+  const elevDm = new Uint16Array(decodeBase64(terrainData.elev_dm_b64));
+  const elevations = new Float32Array(elevDm.length);
+  for (let i = 0; i < elevDm.length; i++) elevations[i] = elevDm[i] / 10.0;
 
   let currentExaggeration = 1.8;
   const urlParams = new URLSearchParams(window.location.search);
@@ -109,10 +121,10 @@
     const y1 = Math.min(RES - 1, y0 + 1);
     const dx = gx - x0;
     const dy = gy - y0;
-    const e00 = terrainData.elevations[y0][x0];
-    const e10 = terrainData.elevations[y0][x1];
-    const e01 = terrainData.elevations[y1][x0];
-    const e11 = terrainData.elevations[y1][x1];
+    const e00 = elevations[y0 * RES + x0];
+    const e10 = elevations[y0 * RES + x1];
+    const e01 = elevations[y1 * RES + x0];
+    const e11 = elevations[y1 * RES + x1];
     const eTop = e00 * (1 - dx) + e10 * dx;
     const eBot = e01 * (1 - dx) + e11 * dx;
     return eTop * (1 - dy) + eBot * dy;
@@ -140,6 +152,10 @@
 
   const topoTexture = textureLoader.load(texturesData.topographic);
   topoTexture.anisotropy = 8;
+
+  // Multi-directional hillshade baked from the 1 m LiDAR ground model
+  const reliefTexture = textureLoader.load(texturesData.relief);
+  reliefTexture.anisotropy = 8;
 
   // Generate Slope Heatmap Texture dynamically
   function generateSlopeTexture() {
@@ -217,7 +233,7 @@
       flatShading: false
     }),
     relief: new THREE.MeshStandardMaterial({
-      color: 0xe2e8f0,
+      map: reliefTexture,
       roughness: 0.65,
       metalness: 0.1,
       flatShading: false
@@ -231,7 +247,8 @@
   };
 
   // Build Terrain Mesh
-  const MESH_RES = 160;
+  const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches;
+  const MESH_RES = IS_TOUCH ? 512 : 768;
   const terrainGeo = new THREE.PlaneGeometry(MAP_WIDTH, MAP_DEPTH, MESH_RES - 1, MESH_RES - 1);
   terrainGeo.rotateX(-Math.PI / 2);
 
@@ -326,180 +343,159 @@
   buildSkirtGeometry();
   scene.add(skirtGroup);
 
-  // Water Bodies (Lake Ilsanjo & Ledson Marsh)
+  // Water Bodies (Lake Ilsanjo)
   const waterGroup = new THREE.Group();
-  let lakeMesh = null;
-  let marshMesh = null;
+  const waterMat = new THREE.MeshStandardMaterial({
+    color: 0x0284c7,
+    roughness: 0.12,
+    metalness: 0.25,
+    transparent: true,
+    opacity: 0.88
+  });
 
   function buildWaterBodies() {
     waterGroup.clear();
 
     features.water_bodies.forEach(wb => {
-      const isLake = wb.type === 'lake';
-      const pts = wb.polygon.map(p => new THREE.Vector2(p.x, -p.z));
-      const shape = new THREE.Shape(pts);
-      const waterGeo = new THREE.ShapeGeometry(shape);
+      const pts = wb.polygon.map(p => new THREE.Vector2((p.u - 0.5) * MAP_WIDTH, -(p.v - 0.5) * MAP_DEPTH));
+      const waterGeo = new THREE.ShapeGeometry(new THREE.Shape(pts));
       waterGeo.rotateX(-Math.PI / 2);
 
-      const centerEle = getRawElevation(wb.center.u, wb.center.v);
-      const worldY = elevationToWorldY(centerEle, currentExaggeration) + (isLake ? 0.15 : 0.08);
-
-      const waterMat = new THREE.MeshStandardMaterial({
-        color: isLake ? 0x0284c7 : 0x15803d,
-        roughness: isLake ? 0.12 : 0.6,
-        metalness: isLake ? 0.25 : 0.05,
-        transparent: true,
-        opacity: isLake ? 0.88 : 0.72
-      });
-
       const mesh = new THREE.Mesh(waterGeo, waterMat);
-      mesh.position.y = worldY;
+      mesh.position.y = elevationToWorldY(wb.surface_m, currentExaggeration) + 0.02;
       mesh.receiveShadow = true;
       waterGroup.add(mesh);
-
-      if (isLake) lakeMesh = mesh;
-      else marshMesh = mesh;
     });
   }
   buildWaterBodies();
   scene.add(waterGroup);
 
-  // 3D Forest Canopy (16,000 Instanced Trees)
+  // LiDAR Forest: every tree detected in the 1 m canopy height model, drawn at true size.
+  // Record layout (8 bytes): u uint16, v uint16, height dm uint16, crown radius dm uint8, kind uint8
   const treesGroup = new THREE.Group();
-  const treesData = data.trees || [];
-
-  const firFoliageGeo = new THREE.ConeGeometry(0.38, 1.5, 5);
-  firFoliageGeo.translate(0, 1.05, 0);
-
-  const oakFoliageGeo = new THREE.DodecahedronGeometry(0.52, 0);
-  oakFoliageGeo.translate(0, 0.85, 0);
-
-  const trunkGeo = new THREE.CylinderGeometry(0.08, 0.12, 0.6, 4);
-  trunkGeo.translate(0, 0.3, 0);
-
-  const firMat = new THREE.MeshStandardMaterial({
-    color: 0x14532d, // Deep Douglas fir forest green
-    roughness: 0.85,
-    metalness: 0.05,
-    flatShading: true
-  });
-
-  const oakMat = new THREE.MeshStandardMaterial({
-    color: 0x4d7c0f, // Warm California live oak olive green
-    roughness: 0.8,
-    metalness: 0.05,
-    flatShading: true
-  });
-
-  const trunkMat = new THREE.MeshStandardMaterial({
-    color: 0x3e2723, // Bark brown
-    roughness: 0.9,
-    metalness: 0.05
-  });
-
-  const firs = treesData.filter(t => t.t === 0);
-  const oaks = treesData.filter(t => t.t === 1);
-
-  let firMesh = null, oakMesh = null, firTrunkMesh = null, oakTrunkMesh = null;
-
-  if (firs.length > 0) {
-    firMesh = new THREE.InstancedMesh(firFoliageGeo, firMat, firs.length);
-    firTrunkMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, firs.length);
-    firMesh.castShadow = true;
-    firMesh.receiveShadow = true;
-    treesGroup.add(firTrunkMesh);
-    treesGroup.add(firMesh);
+  const treeBytes = new DataView(decodeBase64(data.trees.b64));
+  const TREE_COUNT = data.trees.count;
+  const treeX = new Float32Array(TREE_COUNT);
+  const treeZ = new Float32Array(TREE_COUNT);
+  const treeU = new Float32Array(TREE_COUNT);
+  const treeV = new Float32Array(TREE_COUNT);
+  const treeH = new Float32Array(TREE_COUNT);   // meters
+  const treeR = new Float32Array(TREE_COUNT);   // crown radius, meters
+  const treeKind = new Uint8Array(TREE_COUNT);  // 0 conifer, 1 broadleaf
+  for (let i = 0; i < TREE_COUNT; i++) {
+    const o = i * 8;
+    treeU[i] = treeBytes.getUint16(o, true) / 65535;
+    treeV[i] = treeBytes.getUint16(o + 2, true) / 65535;
+    treeH[i] = treeBytes.getUint16(o + 4, true) / 10;
+    treeR[i] = treeBytes.getUint8(o + 6) / 10;
+    treeKind[i] = treeBytes.getUint8(o + 7);
+    treeX[i] = (treeU[i] - 0.5) * MAP_WIDTH;
+    treeZ[i] = (treeV[i] - 0.5) * MAP_DEPTH;
   }
 
-  if (oaks.length > 0) {
-    oakMesh = new THREE.InstancedMesh(oakFoliageGeo, oakMat, oaks.length);
-    oakTrunkMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, oaks.length);
-    oakMesh.castShadow = true;
-    oakMesh.receiveShadow = true;
-    treesGroup.add(oakTrunkMesh);
-    treesGroup.add(oakMesh);
-  }
+  // Unit-sized crowns, scaled per instance to (crown radius, height, crown radius)
+  const coniferGeo = new THREE.ConeGeometry(1, 0.85, 7);
+  coniferGeo.translate(0, 0.15 + 0.425, 0);
+  const broadleafGeo = new THREE.IcosahedronGeometry(1, 0);
+  broadleafGeo.scale(1, 0.4, 1);
+  broadleafGeo.translate(0, 0.6, 0);
+
+  const coniferMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0.0, flatShading: true });
+  const broadleafMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0.0, flatShading: true });
+  const CONIFER_COLOR = new THREE.Color(0x1f5a36);
+  const BROADLEAF_COLOR = new THREE.Color(0x5f7f2a);
+
+  const kindIndex = [[], []];
+  for (let i = 0; i < TREE_COUNT; i++) kindIndex[treeKind[i]].push(i);
+
+  const treeMeshes = [
+    new THREE.InstancedMesh(coniferGeo, coniferMat, Math.max(1, kindIndex[0].length)),
+    new THREE.InstancedMesh(broadleafGeo, broadleafMat, Math.max(1, kindIndex[1].length))
+  ];
+  treeMeshes.forEach((mesh, k) => {
+    mesh.count = kindIndex[k].length;
+    mesh.castShadow = !IS_TOUCH;
+    mesh.receiveShadow = true;
+    // Deterministic per-tree tint so the canopy doesn't read as one flat color
+    const base = k === 0 ? CONIFER_COLOR : BROADLEAF_COLOR;
+    const c = new THREE.Color();
+    kindIndex[k].forEach((treeIdx, j) => {
+      const jitter = 0.82 + 0.3 * (((treeIdx * 2654435761) >>> 0) % 1000) / 1000;
+      c.copy(base).multiplyScalar(jitter);
+      mesh.setColorAt(j, c);
+    });
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    treesGroup.add(mesh);
+  });
 
   const treeDummy = new THREE.Object3D();
-
   function updateTreePositions() {
-    if (firMesh) {
-      for (let i = 0; i < firs.length; i++) {
-        const t = firs[i];
-        const ele_m = getRawElevation(t.u, t.v);
-        const worldY = elevationToWorldY(ele_m, currentExaggeration);
-        treeDummy.position.set(t.x, worldY, t.z);
+    treeMeshes.forEach((mesh, k) => {
+      kindIndex[k].forEach((i, j) => {
+        // Sink the base slightly so trees sit in the (interpolated) ground on slopes
+        const groundY = elevationToWorldY(getRawElevation(treeU[i], treeV[i]), currentExaggeration);
+        treeDummy.position.set(treeX[i], groundY - 1.0 * WORLD_PER_M * currentExaggeration, treeZ[i]);
         treeDummy.rotation.y = (i * 0.73) % (Math.PI * 2);
-        treeDummy.scale.set(t.s, t.s, t.s);
+        const r = Math.max(treeR[i], 1.0) * WORLD_PER_M;
+        treeDummy.scale.set(r, treeH[i] * WORLD_PER_M, r);
         treeDummy.updateMatrix();
-
-        firMesh.setMatrixAt(i, treeDummy.matrix);
-        firTrunkMesh.setMatrixAt(i, treeDummy.matrix);
-      }
-      firMesh.instanceMatrix.needsUpdate = true;
-      firTrunkMesh.instanceMatrix.needsUpdate = true;
-    }
-
-    if (oakMesh) {
-      for (let i = 0; i < oaks.length; i++) {
-        const t = oaks[i];
-        const ele_m = getRawElevation(t.u, t.v);
-        const worldY = elevationToWorldY(ele_m, currentExaggeration);
-        treeDummy.position.set(t.x, worldY, t.z);
-        treeDummy.rotation.y = (i * 1.13) % (Math.PI * 2);
-        treeDummy.scale.set(t.s, t.s, t.s);
-        treeDummy.updateMatrix();
-
-        oakMesh.setMatrixAt(i, treeDummy.matrix);
-        oakTrunkMesh.setMatrixAt(i, treeDummy.matrix);
-      }
-      oakMesh.instanceMatrix.needsUpdate = true;
-      oakTrunkMesh.instanceMatrix.needsUpdate = true;
-    }
+        mesh.setMatrixAt(j, treeDummy.matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+    });
   }
   updateTreePositions();
   scene.add(treesGroup);
+  document.getElementById('trees-toggle-label').textContent = `LiDAR Forest (${TREE_COUNT.toLocaleString()} trees)`;
 
-  // Fast Spatial Hash for LiDAR Tree Inspector (50x50 grid)
-  const TREE_GRID_COLS = 50;
-  const TREE_GRID_ROWS = 50;
-  const treeSpatialGrid = Array.from({ length: TREE_GRID_COLS * TREE_GRID_ROWS }, () => []);
-
-  function getTreeGridCoord(x, z) {
-    const col = Math.floor(((x / MAP_WIDTH) + 0.5) * TREE_GRID_COLS);
-    const row = Math.floor(((z / MAP_DEPTH) + 0.5) * TREE_GRID_ROWS);
-    return {
-      col: Math.max(0, Math.min(TREE_GRID_COLS - 1, col)),
-      row: Math.max(0, Math.min(TREE_GRID_ROWS - 1, row))
-    };
+  // Spatial hash for the tree inspector (counting-sort into a 200x200 grid)
+  const TREE_GRID = 200;
+  const treeCellStart = new Uint32Array(TREE_GRID * TREE_GRID + 1);
+  const treeCellItems = new Uint32Array(TREE_COUNT);
+  function treeCell(u, v) {
+    const c = Math.min(TREE_GRID - 1, Math.max(0, Math.floor(u * TREE_GRID)));
+    const r = Math.min(TREE_GRID - 1, Math.max(0, Math.floor(v * TREE_GRID)));
+    return r * TREE_GRID + c;
   }
+  (function buildTreeGrid() {
+    for (let i = 0; i < TREE_COUNT; i++) treeCellStart[treeCell(treeU[i], treeV[i]) + 1]++;
+    for (let c = 0; c < TREE_GRID * TREE_GRID; c++) treeCellStart[c + 1] += treeCellStart[c];
+    const fill = treeCellStart.slice(0, TREE_GRID * TREE_GRID);
+    for (let i = 0; i < TREE_COUNT; i++) treeCellItems[fill[treeCell(treeU[i], treeV[i])]++] = i;
+  })();
 
-  treesData.forEach(t => {
-    const { col, row } = getTreeGridCoord(t.x, t.z);
-    treeSpatialGrid[row * TREE_GRID_COLS + col].push(t);
-  });
-
-  function findNearestTree(x, z, maxDist = 0.65) {
-    const { col, row } = getTreeGridCoord(x, z);
-    let best = null;
-    let bestDistSq = maxDist * maxDist;
-
-    for (let r = Math.max(0, row - 1); r <= Math.min(TREE_GRID_ROWS - 1, row + 1); r++) {
-      for (let c = Math.max(0, col - 1); c <= Math.min(TREE_GRID_COLS - 1, col + 1); c++) {
-        const cell = treeSpatialGrid[r * TREE_GRID_COLS + c];
-        for (let i = 0; i < cell.length; i++) {
-          const t = cell[i];
-          const dx = t.x - x;
-          const dz = t.z - z;
-          const dsq = dx * dx + dz * dz;
-          if (dsq < bestDistSq) {
-            bestDistSq = dsq;
-            best = t;
+  // Nearest tree whose crown covers the point (x, z) in world units, or -1
+  function findNearestTree(x, z) {
+    const u = x / MAP_WIDTH + 0.5;
+    const v = z / MAP_DEPTH + 0.5;
+    const col = Math.min(TREE_GRID - 1, Math.max(0, Math.floor(u * TREE_GRID)));
+    const row = Math.min(TREE_GRID - 1, Math.max(0, Math.floor(v * TREE_GRID)));
+    let best = -1;
+    let bestScore = Infinity;
+    for (let r = Math.max(0, row - 1); r <= Math.min(TREE_GRID - 1, row + 1); r++) {
+      for (let c = Math.max(0, col - 1); c <= Math.min(TREE_GRID - 1, col + 1); c++) {
+        const cell = r * TREE_GRID + c;
+        for (let n = treeCellStart[cell]; n < treeCellStart[cell + 1]; n++) {
+          const i = treeCellItems[n];
+          const dx = treeX[i] - x;
+          const dz = treeZ[i] - z;
+          const crown = Math.max(treeR[i], 2.0) * WORLD_PER_M;
+          const score = (dx * dx + dz * dz) / (crown * crown);
+          if (score < 1.0 && score < bestScore) {
+            bestScore = score;
+            best = i;
           }
         }
       }
     }
     return best;
+  }
+
+  function describeTree(i) {
+    const species = treeKind[i] === 0 ? '🌲 Conifer (Douglas-fir / redwood)' : '🌳 Broadleaf (oak / bay / madrone)';
+    const heightFt = Math.round(treeH[i] * 3.28084);
+    const crownFt = Math.round(treeR[i] * 2 * 3.28084);
+    return `${species} <span style="color:#94a3b8; font-size:11px; font-weight:normal;">${heightFt} ft tall · ${crownFt} ft crown</span>`;
   }
 
   // Official State Park Boundary Line
@@ -606,64 +602,9 @@
   buildTrails();
   scene.add(trailsGroup);
 
-  // Landmarks & Peaks (Bennett Mountain, Trailheads, Lakes)
-  const landmarksGroup = new THREE.Group();
-  const landmarkLabels = [];
-
-  function buildLandmarks() {
-    landmarksGroup.clear();
-    landmarkLabels.length = 0;
-
-    features.landmarks.forEach(lm => {
-      const worldPos = uvToWorld(lm.pos.u, lm.pos.v, 0.3);
-      const isPeak = lm.category === 'summit';
-      const isWater = lm.category === 'water' || lm.category === 'wetland';
-
-      // 3D Pin Pole
-      const poleHeight = isPeak ? 3.5 : 2.2;
-      const poleGeo = new THREE.CylinderGeometry(0.12, 0.12, poleHeight);
-      const poleMat = new THREE.MeshStandardMaterial({
-        color: isPeak ? 0xf59e0b : 0x38bdf8,
-        metalness: 0.8,
-        roughness: 0.2
-      });
-      const pole = new THREE.Mesh(poleGeo, poleMat);
-      pole.position.set(worldPos.x, worldPos.y + poleHeight / 2, worldPos.z);
-      landmarksGroup.add(pole);
-
-      // Sphere beacon
-      const beaconGeo = new THREE.SphereGeometry(isPeak ? 0.6 : 0.4, 16, 16);
-      const beaconMat = new THREE.MeshStandardMaterial({
-        color: isPeak ? 0xffea00 : (isWater ? 0x0284c7 : 0x10b981),
-        emissive: isPeak ? 0xd97706 : (isWater ? 0x0369a1 : 0x047857),
-        emissiveIntensity: 0.7,
-        roughness: 0.2
-      });
-      const beacon = new THREE.Mesh(beaconGeo, beaconMat);
-      beacon.position.set(worldPos.x, worldPos.y + poleHeight, worldPos.z);
-      beacon.userData = { landmark: lm };
-      landmarksGroup.add(beacon);
-
-      // 2D HTML Label
-      const labelDiv = document.createElement('div');
-      labelDiv.className = `map-label ${isPeak ? 'peak-label' : (isWater ? 'water-label' : '')}`;
-      labelDiv.textContent = `${lm.name} (${lm.elevation_ft.toLocaleString()} ft)`;
-      labelsContainer.appendChild(labelDiv);
-
-      landmarkLabels.push({
-        element: labelDiv,
-        worldPos: new THREE.Vector3(worldPos.x, worldPos.y + poleHeight + 0.5, worldPos.z),
-        landmark: lm
-      });
-    });
-  }
-  buildLandmarks();
-  scene.add(landmarksGroup);
-
   // Update Billboard Labels on Screen Projection
   function updateScreenLabels() {
     const showTrailLabels = document.getElementById('toggle-labels').checked;
-    const showLandmarks = document.getElementById('toggle-landmarks').checked;
 
     const tempV = new THREE.Vector3();
 
@@ -698,26 +639,6 @@
       } else {
         tl.element.classList.remove('active-trail-label');
       }
-    });
-
-    // Landmark Labels
-    landmarkLabels.forEach(ll => {
-      if (!showLandmarks) {
-        ll.element.style.display = 'none';
-        return;
-      }
-      tempV.copy(ll.worldPos).project(camera);
-
-      if (tempV.z > 1.0 || Math.abs(tempV.x) > 1.1 || Math.abs(tempV.y) > 1.1) {
-        ll.element.style.display = 'none';
-        return;
-      }
-
-      const x = (tempV.x * 0.5 + 0.5) * window.innerWidth;
-      const y = (-(tempV.y * 0.5) + 0.5) * window.innerHeight;
-      ll.element.style.display = 'block';
-      ll.element.style.left = `${x}px`;
-      ll.element.style.top = `${y}px`;
     });
   }
 
@@ -755,7 +676,7 @@
     raycaster.setFromCamera(mouse, camera);
     const intersectsTerrain = raycaster.intersectObject(terrainMesh);
 
-    let nearTree = null;
+    let nearTree = -1;
     if (intersectsTerrain.length > 0) {
       const hit = intersectsTerrain[0];
       const u = (hit.point.x / MAP_WIDTH) + 0.5;
@@ -770,7 +691,7 @@
       hudCoords.textContent = `${lat.toFixed(4)}°N, ${Math.abs(lon).toFixed(4)}°W`;
 
       if (document.getElementById('toggle-trees').checked) {
-        nearTree = findNearestTree(hit.point.x, hit.point.z, 0.48);
+        nearTree = findNearestTree(hit.point.x, hit.point.z);
       }
     }
 
@@ -782,11 +703,10 @@
       hudFeature.textContent = hitTr.name;
       hudFeature.style.color = '#fbbf24';
       highlightTrail(hitTr);
-    } else if (nearTree) {
+    } else if (nearTree >= 0) {
       container.style.cursor = 'default';
-      const species = nearTree.t === 0 ? "🌲 Douglas Fir" : "🌳 Coast Live Oak";
-      hudFeature.innerHTML = `${species} <span style="color:#94a3b8; font-size:11px; font-weight:normal;">(LiDAR: ${nearTree.h} ft)</span>`;
-      hudFeature.style.color = nearTree.t === 0 ? '#4ade80' : '#a3e635';
+      hudFeature.innerHTML = describeTree(nearTree);
+      hudFeature.style.color = treeKind[nearTree] === 0 ? '#4ade80' : '#a3e635';
       if (!selectedTrail) unhighlightTrail();
     } else {
       container.style.cursor = 'default';
@@ -828,15 +748,14 @@
       hudElev.textContent = `${ele_ft.toLocaleString()} ft (${Math.round(ele_m)} m)`;
       hudCoords.textContent = `${lat.toFixed(4)}°N, ${Math.abs(lon).toFixed(4)}°W`;
 
-      let nearTree = null;
+      let nearTree = -1;
       if (document.getElementById('toggle-trees').checked) {
-        nearTree = findNearestTree(hit.point.x, hit.point.z, 0.48);
+        nearTree = findNearestTree(hit.point.x, hit.point.z);
       }
 
-      if (nearTree) {
-        const species = nearTree.t === 0 ? "🌲 Douglas Fir" : "🌳 Coast Live Oak";
-        hudFeature.innerHTML = `${species} <span style="color:#94a3b8; font-size:11px; font-weight:normal;">(LiDAR: ${nearTree.h} ft)</span>`;
-        hudFeature.style.color = nearTree.t === 0 ? '#4ade80' : '#a3e635';
+      if (nearTree >= 0) {
+        hudFeature.innerHTML = describeTree(nearTree);
+        hudFeature.style.color = treeKind[nearTree] === 0 ? '#4ade80' : '#a3e635';
       } else {
         hudFeature.textContent = 'Ground';
         hudFeature.style.color = '#34d399';
@@ -999,8 +918,6 @@
     buildTrails();
     // Update boundary
     buildBoundary();
-    // Update landmarks
-    buildLandmarks();
     // Update trees
     updateTreePositions();
   });
@@ -1029,10 +946,6 @@
     treesGroup.visible = e.target.checked;
   });
   document.getElementById('toggle-labels').addEventListener('change', () => {
-    updateScreenLabels();
-  });
-  document.getElementById('toggle-landmarks').addEventListener('change', (e) => {
-    landmarksGroup.visible = e.target.checked;
     updateScreenLabels();
   });
   document.getElementById('toggle-boundary').addEventListener('change', (e) => {
@@ -1130,19 +1043,9 @@
   });
 
   // Main Render Loop
-  let frame = 0;
   function animate() {
     requestAnimationFrame(animate);
     controls.update();
-
-    // Gentle pulse animation on Bennett Mountain beacon
-    frame++;
-    const pulse = Math.sin(frame * 0.05) * 0.2 + 0.9;
-    landmarksGroup.children.forEach(child => {
-      if (child.userData.landmark && child.userData.landmark.category === 'summit') {
-        child.scale.set(pulse, pulse, pulse);
-      }
-    });
 
     updateScreenLabels();
     updateCompass();

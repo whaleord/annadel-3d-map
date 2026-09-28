@@ -8,18 +8,18 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Annadel 3D">
-  <meta name="description" content="Interactive 3D topographical relief map of Trione-Annadel State Park featuring USGS 3DEP LiDAR elevation data, forest canopy, and 27 official trails.">
+  <meta name="description" content="Interactive 3D topographical relief map of Trione-Annadel State Park built from 2022 USGS 3DEP LiDAR: 1 m terrain, every individual tree, and 27 official trails.">
   
   <!-- Open Graph / Social Sharing (iMessage, Discord, Twitter, Facebook) -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://whaleord.github.io/annadel-3d-map/">
   <meta property="og:title" content="Trione-Annadel State Park • 3D Topographical Map">
-  <meta property="og:description" content="Interactive 3D topographical relief map of Trione-Annadel State Park featuring USGS 3DEP LiDAR elevation data, forest canopy, and 27 official trails.">
+  <meta property="og:description" content="Interactive 3D topographical relief map of Trione-Annadel State Park built from 2022 USGS 3DEP LiDAR: 1 m terrain, every individual tree, and 27 official trails.">
   <meta property="og:image" content="https://whaleord.github.io/annadel-3d-map/og-preview.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:url" content="https://whaleord.github.io/annadel-3d-map/">
   <meta name="twitter:title" content="Trione-Annadel State Park • 3D Topographical Map">
-  <meta name="twitter:description" content="Interactive 3D topographical relief map of Trione-Annadel State Park featuring USGS 3DEP LiDAR elevation data, forest canopy, and 27 official trails.">
+  <meta name="twitter:description" content="Interactive 3D topographical relief map of Trione-Annadel State Park built from 2022 USGS 3DEP LiDAR: 1 m terrain, every individual tree, and 27 official trails.">
   <meta name="twitter:image" content="https://whaleord.github.io/annadel-3d-map/og-preview.png">
 
   <link rel="manifest" href="manifest.json">
@@ -52,7 +52,7 @@
       <span class="title-badge">State Park</span>
       <div>
         <h1>Trione-Annadel</h1>
-        <div class="subtitle">3D Topographical Relief • 1m LiDAR Canopy • 27 Official Trails</div>
+        <div class="subtitle">Every tree from 2022 USGS LiDAR • 27 Official Trails</div>
       </div>
     </div>
     <button id="btn-toggle-menu" class="pill-btn" onclick="toggleMenu()">☰ Menu</button>
@@ -126,7 +126,7 @@
         </div>
       </label>
       <label class="toggle-item">
-        <span>3D Forest Canopy (20,188 LiDAR Trees)</span>
+        <span id="trees-toggle-label">LiDAR Forest</span>
         <div class="toggle-switch">
           <input type="checkbox" id="toggle-trees" checked>
           <span class="slider-toggle"></span>
@@ -136,13 +136,6 @@
         <span>Trail Labels</span>
         <div class="toggle-switch">
           <input type="checkbox" id="toggle-labels">
-          <span class="slider-toggle"></span>
-        </div>
-      </label>
-      <label class="toggle-item">
-        <span>Landmarks & Peaks</span>
-        <div class="toggle-switch">
-          <input type="checkbox" id="toggle-landmarks" checked>
           <span class="slider-toggle"></span>
         </div>
       </label>

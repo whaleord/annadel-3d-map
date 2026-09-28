@@ -1,4 +1,4 @@
-const CACHE_NAME = 'annadel-3d-v1';
+const CACHE_NAME = 'annadel-3d-v2';
 const ASSETS_TO_CACHE = [
   './',
   'index.html',
