@@ -23,6 +23,11 @@ from config import CELL_X_M, LAT_MAX, LAT_MIN, LON_MAX, LON_MIN, NX, NY, REPO, W
 
 MIN_TREE_HEIGHT_M = 5.0   # below this it's shrub / chaparral
 CROWN_FLOOR_M = 2.0       # crowns stop where the canopy drops below this
+MIN_CROWN_AREA_M2 = 5.0
+MAX_ELONGATION = 4.0      # major/minor axis ratio of the crown footprint
+# Taller "trees" are high-voltage wires spanning the canyons on the park's east side
+# (all 60 m+ detections line up along that corridor); real crowns here top out in the 50s.
+MAX_TREE_HEIGHT_M = 62.0
 TILE = 2048
 MARGIN = 48
 
@@ -59,10 +64,25 @@ def detect_tile(chm):
     markers = np.zeros(chm.shape, dtype=np.int32)
     markers[ys, xs] = np.arange(1, n + 1)
     crowns = watershed(-smooth, markers, mask=smooth >= CROWN_FLOOR_M)
-    area = ndimage.sum_labels(np.ones_like(crowns), crowns, index=np.arange(1, n + 1))
-    height = ndimage.maximum(chm, crowns, index=np.arange(1, n + 1))
+    labels = np.arange(1, n + 1)
+    area = ndimage.sum_labels(np.ones_like(crowns), crowns, index=labels)
+    height = np.asarray(ndimage.maximum(chm, crowns, index=labels))
     radius = np.sqrt(np.maximum(area, 1.0) * CELL_X_M * CELL_X_M / np.pi)
-    return np.stack([ys, xs], axis=1), np.asarray(height), radius
+
+    # Reject power-line spans and other non-trees: real crowns are compact blobs,
+    # wires show up as thin elongated streaks in the canopy model
+    yy, xx = np.indices(crowns.shape)
+    a = np.maximum(area, 1.0)
+    mx = ndimage.sum_labels(xx, crowns, labels) / a
+    my = ndimage.sum_labels(yy, crowns, labels) / a
+    sxx = ndimage.sum_labels(xx * xx, crowns, labels) / a - mx * mx
+    syy = ndimage.sum_labels(yy * yy, crowns, labels) / a - my * my
+    sxy = ndimage.sum_labels(xx * yy, crowns, labels) / a - mx * my
+    tr, det = sxx + syy, sxx * syy - sxy * sxy
+    disc = np.sqrt(np.maximum(tr * tr / 4 - det, 0))
+    elongation = np.sqrt((tr / 2 + disc) / np.maximum(tr / 2 - disc, 0.05))
+    ok = (area >= MIN_CROWN_AREA_M2) & (elongation <= MAX_ELONGATION)
+    return np.stack([ys, xs], axis=1)[ok], height[ok], radius[ok]
 
 
 def main():
@@ -90,7 +110,7 @@ def main():
 
     lon = LON_MIN + (rc[:, 1] + 0.5) / NX * (LON_MAX - LON_MIN)
     lat = LAT_MAX - (rc[:, 0] + 0.5) / NY * (LAT_MAX - LAT_MIN)
-    inside = boundary.contains_points(np.stack([lon, lat], axis=1))
+    inside = boundary.contains_points(np.stack([lon, lat], axis=1)) & (height <= MAX_TREE_HEIGHT_M)
     lon, lat, height, radius = lon[inside], lat[inside], height[inside], radius[inside]
 
     # Species group from the Veg Map alliance raster (1024^2 over the same bounds):

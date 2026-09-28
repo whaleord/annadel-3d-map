@@ -394,7 +394,7 @@
   }
 
   // Unit-sized crowns, scaled per instance to (crown radius, height, crown radius)
-  const coniferGeo = new THREE.ConeGeometry(1, 0.85, 7);
+  const coniferGeo = new THREE.ConeGeometry(1, 0.85, 7, 1, true);
   coniferGeo.translate(0, 0.15 + 0.425, 0);
   const broadleafGeo = new THREE.IcosahedronGeometry(1, 0);
   broadleafGeo.scale(1, 0.4, 1);
@@ -414,7 +414,8 @@
   ];
   treeMeshes.forEach((mesh, k) => {
     mesh.count = kindIndex[k].length;
-    mesh.castShadow = !IS_TOUCH;
+    // At whole-park scale a shadow-map texel is ~6 m, so per-tree shadows aren't worth a second geometry pass
+    mesh.castShadow = false;
     mesh.receiveShadow = true;
     // Deterministic per-tree tint so the canopy doesn't read as one flat color
     const base = k === 0 ? CONIFER_COLOR : BROADLEAF_COLOR;

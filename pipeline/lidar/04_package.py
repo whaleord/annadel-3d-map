@@ -14,6 +14,7 @@ import math
 import os
 
 import numpy as np
+from matplotlib.path import Path
 from PIL import Image
 from scipy import ndimage
 
@@ -108,8 +109,22 @@ def main():
     dem = np.load(os.path.join(WORK, "dem_1m.npy"))
     cx, cy = 8720.0 / NX, 7774.0 / NY
 
+    features = json.load(open(os.path.join(REPO, "data", "annadel_features.json")))
+    lake = [w for w in features["water_bodies"] if w["type"] == "lake"]
+
     # Terrain grid for the mesh
     grid = resample(dem, GRID_RES, GRID_RES)
+    # Lidar barely returns from open water, so the lake bed is gap-filled from the shore and
+    # would poke through the water surface. Sink it just below the surface instead.
+    gv, gu = np.mgrid[0:GRID_RES, 0:GRID_RES] / (GRID_RES - 1.0)
+    for w in lake:
+        us = np.array([p["u"] for p in w["polygon"]]); vs = np.array([p["v"] for p in w["polygon"]])
+        z = ndimage.map_coordinates(dem, [vs * NY - 0.5, us * NX - 0.5], order=1, mode="nearest")
+        w["surface_m"] = float(np.percentile(z, 10))
+        w["polygon"] = [{"u": p["u"], "v": p["v"]} for p in w["polygon"]]
+        inside = Path(np.stack([us, vs], axis=1)).contains_points(np.stack([gu.ravel(), gv.ravel()], axis=1))
+        inside = ndimage.binary_dilation(inside.reshape(GRID_RES, GRID_RES))
+        grid[inside] = np.minimum(grid[inside], w["surface_m"] - 1.5)
     dm = np.round(grid * 10).astype("<u2")
     terrain = {
         "bounds": {"lat_min": LAT_MIN, "lat_max": LAT_MAX, "lon_min": LON_MIN, "lon_max": LON_MAX},
@@ -143,15 +158,7 @@ def main():
     trees = {"count": int(len(rec)), "b64": base64.b64encode(rec.tobytes()).decode("ascii")}
 
     # Vector features: keep trails, the real lake outline and the boundary
-    features = json.load(open(os.path.join(REPO, "data", "annadel_features.json")))
     trail_stats(features["trails"], dem)
-    lake = [w for w in features["water_bodies"] if w["type"] == "lake"]
-    for w in lake:
-        w["polygon"] = [{"u": p["u"], "v": p["v"]} for p in w["polygon"]]
-        # Lake surface: lowest part of the shoreline on the LiDAR DEM
-        us = np.array([p["u"] for p in w["polygon"]]); vs = np.array([p["v"] for p in w["polygon"]])
-        z = ndimage.map_coordinates(dem, [vs * NY - 0.5, us * NX - 0.5], order=1, mode="nearest")
-        w["surface_m"] = float(np.percentile(z, 10))
     bundle = {
         "meta": {
             "source": "USGS 3DEP lidar CA_NorthernCA_1_B22 (flown 2022), 1 m ground and canopy models",

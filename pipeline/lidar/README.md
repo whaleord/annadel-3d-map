@@ -30,4 +30,7 @@ Large intermediates go in `work/` (gitignored, ~3 GB). Step 1 is resumable.
 
 - Dense oak/bay woodland with merged crowns is under-segmented (several trees become one wide crown);
   isolated trees and conifers come out well.
+- A high-voltage line crosses the east side of the park. Its wires are unclassified in the source
+  data; spans high over canyons are removed by a 62 m height cap, but lower spans can still leave a
+  few false "trees" along the corridor.
 - Species is the stand's alliance, not a per-tree identification.
