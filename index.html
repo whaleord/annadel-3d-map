@@ -2,210 +2,152 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Trione-Annadel State Park • 3D Topographical Map</title>
-  <meta name="theme-color" content="#0b0f14">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Trione-Annadel 3D</title>
+  <meta name="theme-color" content="#0d1117">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Annadel 3D">
-  <meta name="description" content="Interactive 3D topographical relief map of Trione-Annadel State Park built from 2022 USGS 3DEP LiDAR: 1 m terrain, every individual tree, and 27 official trails.">
-  
-  <!-- Open Graph / Social Sharing (iMessage, Discord, Twitter, Facebook) -->
+  <meta name="description" content="3D model of Trione-Annadel State Park built from 2022 USGS 3DEP LiDAR: 1 m terrain, every individual tree, and 26 official trails.">
+
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://whaleord.github.io/annadel-3d-map/">
-  <meta property="og:title" content="Trione-Annadel State Park • 3D Topographical Map">
-  <meta property="og:description" content="Interactive 3D topographical relief map of Trione-Annadel State Park built from 2022 USGS 3DEP LiDAR: 1 m terrain, every individual tree, and 27 official trails.">
+  <meta property="og:title" content="Trione-Annadel State Park in 3D">
+  <meta property="og:description" content="3D model of Trione-Annadel State Park built from 2022 USGS 3DEP LiDAR: 1 m terrain, every individual tree, and 26 official trails.">
   <meta property="og:image" content="https://whaleord.github.io/annadel-3d-map/og-preview.png">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:url" content="https://whaleord.github.io/annadel-3d-map/">
-  <meta name="twitter:title" content="Trione-Annadel State Park • 3D Topographical Map">
-  <meta name="twitter:description" content="Interactive 3D topographical relief map of Trione-Annadel State Park built from 2022 USGS 3DEP LiDAR: 1 m terrain, every individual tree, and 27 official trails.">
+  <meta name="twitter:title" content="Trione-Annadel State Park in 3D">
+  <meta name="twitter:description" content="3D model of Trione-Annadel State Park built from 2022 USGS 3DEP LiDAR: 1 m terrain, every individual tree, and 26 official trails.">
   <meta name="twitter:image" content="https://whaleord.github.io/annadel-3d-map/og-preview.png">
 
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link rel="stylesheet" href="style.css">
-  <!-- Local Three.js & OrbitControls for complete offline support -->
-  <script src="libs/three.min.js"></script>
-  <script src="libs/OrbitControls.js"></script>
-  <!-- Embedded Terrain & Vector Data -->
-  <script src="annadel_data.js"></script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js').then((reg) => {
-          console.log('Annadel 3D Offline Service Worker registered:', reg.scope);
-        }).catch((err) => {
-          console.warn('Service Worker registration failed:', err);
-        });
-      });
-    }
-  </script>
 </head>
 <body>
   <div id="canvas-container"></div>
   <div id="labels-container"></div>
 
-  <!-- Header Banner -->
-  <header id="header-bar" class="glass-panel">
-    <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
-      <span class="title-badge">State Park</span>
-      <div>
-        <h1>Trione-Annadel</h1>
-        <div class="subtitle">Every tree from 2022 USGS LiDAR • 27 Official Trails</div>
-      </div>
-    </div>
-    <button id="btn-toggle-menu" class="pill-btn" onclick="toggleMenu()">☰ Menu</button>
-  </header>
-
-  <!-- Live Cursor Elevation Inspector -->
-  <div id="inspector-hud" class="glass-panel">
-    <div class="hud-title">Terrain Inspector</div>
-    <div>Elevation: <span id="hud-elevation" class="hud-val">---</span></div>
-    <div>Coordinates: <span id="hud-coords" class="hud-val">Hover over terrain</span></div>
-    <div>Under Cursor: <span id="hud-feature" class="hud-val" style="color: #34d399;">Ground</span></div>
+  <div id="loading">
+    <div class="loading-title">Trione-Annadel</div>
+    <div class="loading-sub">Loading terrain and 170,000 trees…</div>
   </div>
 
-  <!-- Left Sidebar Controls -->
-  <aside id="controls-panel" class="glass-panel">
-    <!-- Basemap Texture Selector -->
-    <div class="control-group">
-      <div class="control-label">Basemap Style</div>
-      <div class="btn-group">
-        <button id="btn-sat" class="pill-btn active" onclick="setMapStyle('satellite')">Satellite</button>
-        <button id="btn-topo" class="pill-btn" onclick="setMapStyle('topographic')">Topographic</button>
-      </div>
-      <div class="btn-group">
-        <button id="btn-relief" class="pill-btn" onclick="setMapStyle('relief')">Shaded Relief</button>
-        <button id="btn-slope" class="pill-btn" onclick="setMapStyle('slope')">Slope Heatmap</button>
-      </div>
-    </div>
+  <div id="ui">
+    <header id="title" class="panel">
+      <h1>Trione-Annadel</h1>
+      <p>State Park · 2022 USGS LiDAR</p>
+    </header>
 
-    <!-- Vertical Exaggeration Slider -->
-    <div class="control-group">
-      <div class="control-label">
-        <span>Vertical Exaggeration</span>
-        <span id="val-exaggeration" class="val-display">1.8x</span>
-      </div>
-      <div class="slider-container">
-        <input type="range" id="slider-exaggeration" min="1.0" max="3.0" step="0.1" value="1.8">
-      </div>
-    </div>
+    <button id="btn-panel" class="panel icon-btn" aria-label="Map settings" title="Map settings">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
 
-    <!-- Sun / Lighting Simulation Slider -->
-    <div class="control-group">
-      <div class="control-label">
-        <span>Sun Angle / Time of Day</span>
-        <span id="val-sun" class="val-display">Afternoon (3:00 PM)</span>
-      </div>
-      <div class="slider-container">
-        <input type="range" id="slider-sun" min="0" max="100" step="1" value="65">
-      </div>
-    </div>
-
-    <!-- Official Trail Explorer / Selector -->
-    <div class="control-group">
-      <div class="control-label">
-        <span>Official Trails</span>
-        <span class="val-display" id="trail-count-badge">27 Named</span>
-      </div>
-      <input type="text" id="trail-search" class="search-input" placeholder="Search official trails...">
-      <div id="trail-list" class="trail-select-list">
-        <!-- Populated via JS -->
-      </div>
-    </div>
-
-    <!-- Layer Toggles -->
-    <div class="control-group">
-      <div class="control-label">Map Layers</div>
-      <label class="toggle-item">
-        <span>Official Trails</span>
-        <div class="toggle-switch">
-          <input type="checkbox" id="toggle-trails" checked>
-          <span class="slider-toggle"></span>
+    <aside id="panel" class="panel">
+      <section>
+        <h2>Basemap</h2>
+        <div class="segmented" id="basemap">
+          <button data-style="satellite">Satellite</button>
+          <button data-style="relief">Relief</button>
+          <button data-style="topographic">Topo</button>
+          <button data-style="slope">Slope</button>
         </div>
-      </label>
-      <label class="toggle-item">
-        <span id="trees-toggle-label">LiDAR Forest</span>
-        <div class="toggle-switch">
-          <input type="checkbox" id="toggle-trees" checked>
-          <span class="slider-toggle"></span>
+        <div id="slope-legend" class="legend" hidden>
+          <span style="--c:#22c55e">&lt;12°</span><span style="--c:#eab308">12–25°</span><span style="--c:#f97316">25–35°</span><span style="--c:#ef4444">35°+</span>
         </div>
-      </label>
-      <label class="toggle-item">
-        <span>Trail Labels</span>
-        <div class="toggle-switch">
-          <input type="checkbox" id="toggle-labels">
-          <span class="slider-toggle"></span>
+      </section>
+
+      <section>
+        <h2>Layers</h2>
+        <label class="toggle"><input type="checkbox" id="layer-trees" checked><span>Trees</span><em id="tree-count"></em></label>
+        <label class="toggle"><input type="checkbox" id="layer-trails" checked><span>Trails</span></label>
+        <label class="toggle"><input type="checkbox" id="layer-labels"><span>Trail names</span></label>
+        <label class="toggle"><input type="checkbox" id="layer-power" checked><span>Power line</span></label>
+        <label class="toggle"><input type="checkbox" id="layer-boundary" checked><span>Park boundary</span></label>
+        <label class="toggle"><input type="checkbox" id="layer-water" checked><span>Lake Ilsanjo</span></label>
+      </section>
+
+      <section>
+        <h2>Terrain</h2>
+        <label class="slider">
+          <span>Vertical scale</span><output id="exag-val">1.5×</output>
+          <input type="range" id="exag" min="1" max="3" step="0.1" value="1.5">
+        </label>
+        <label class="slider">
+          <span>Sun</span><output id="sun-val"></output>
+          <input type="range" id="sun" min="0" max="100" step="1" value="62">
+        </label>
+      </section>
+
+      <section>
+        <h2>Views</h2>
+        <div class="views">
+          <button data-view="overview">Whole park</button>
+          <button data-view="ilsanjo">Lake Ilsanjo</button>
+          <button data-view="bennett">Bennett Mtn</button>
+          <button data-view="canyon">Canyon Trail</button>
+          <button data-view="lawndale">Lawndale side</button>
         </div>
-      </label>
-      <label class="toggle-item">
-        <span>Park Boundary</span>
-        <div class="toggle-switch">
-          <input type="checkbox" id="toggle-boundary" checked>
-          <span class="slider-toggle"></span>
+      </section>
+
+      <section>
+        <details id="trails-section">
+          <summary><h2>Trails</h2><span id="trail-count"></span></summary>
+          <input type="search" id="trail-search" placeholder="Search trails" autocomplete="off">
+          <ul id="trail-list"></ul>
+        </details>
+      </section>
+    </aside>
+
+    <div id="trail-card" class="panel" hidden>
+      <div class="card-head">
+        <div>
+          <h3 id="card-name"></h3>
+          <span id="card-diff" class="diff"></span>
         </div>
-      </label>
-      <label class="toggle-item">
-        <span>Water Surface (Lake Ilsanjo)</span>
-        <div class="toggle-switch">
-          <input type="checkbox" id="toggle-water" checked>
-          <span class="slider-toggle"></span>
-        </div>
-      </label>
+        <button class="icon-btn plain" id="card-close" aria-label="Close">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <dl class="stats">
+        <div><dt>Length</dt><dd id="card-length"></dd></div>
+        <div><dt>Climb</dt><dd id="card-climb"></dd></div>
+        <div><dt>Low</dt><dd id="card-low"></dd></div>
+        <div><dt>High</dt><dd id="card-high"></dd></div>
+      </dl>
+      <p id="card-desc"></p>
+      <button id="card-zoom" class="wide-btn">Zoom to trail</button>
     </div>
 
-    <!-- Camera Presets -->
-    <div class="control-group">
-      <div class="control-label">View Presets</div>
-      <div class="preset-grid">
-        <button class="pill-btn" onclick="flyToPreset('overview')">Overview</button>
-        <button class="pill-btn" onclick="flyToPreset('ilsanjo')">Lake Ilsanjo</button>
-        <button class="pill-btn" onclick="flyToPreset('bennett')">Bennett Peak</button>
-        <button class="pill-btn" onclick="flyToPreset('canyon')">Canyon Trail</button>
-        <button class="pill-btn" onclick="flyToPreset('lawndale')">Lawndale Valley</button>
-        <button class="pill-btn" onclick="resetCamera()">Reset Camera</button>
-      </div>
+    <div id="readout" class="panel" aria-live="off">
+      <div id="readout-main">Hover the map</div>
+      <div id="readout-sub"></div>
     </div>
-  </aside>
 
-  <!-- Trail Info Popup Card -->
-  <div id="trail-card" class="glass-panel">
-    <div class="card-header">
-      <div>
-        <div id="card-title" class="card-title">Trail Name</div>
-        <span id="card-diff" class="diff-badge diff-moderate">Moderate</span>
-      </div>
-      <button class="card-close" onclick="closeTrailCard()">&times;</button>
+    <div id="corner">
+      <button id="btn-compass" class="panel icon-btn" aria-label="Face north" title="Face north">
+        <svg id="compass-needle" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path d="M12 3l4 9h-8z" fill="#ef4444"/><path d="M12 21l-4-9h8z" fill="#94a3b8"/>
+        </svg>
+      </button>
+      <button id="btn-hide" class="panel icon-btn" aria-label="Hide interface (H)" title="Hide interface (H)">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+      </button>
     </div>
-    <div class="card-stats">
-      <div class="stat-item">
-        <span class="stat-label">Distance</span>
-        <span id="card-distance" class="stat-value">2.4 mi</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-label">Elev Gain</span>
-        <span id="card-gain" class="stat-value">+450 ft</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-label">Min Elev</span>
-        <span id="card-min-elev" class="stat-value">320 ft</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-label">Max Elev</span>
-        <span id="card-max-elev" class="stat-value">1,120 ft</span>
-      </div>
-    </div>
-    <div id="card-desc" class="card-desc">Trail description goes here...</div>
   </div>
 
-  <!-- Compass Rose -->
-  <div id="compass-rose" class="glass-panel">
-    <div class="compass-arrow" id="compass-needle"></div>
-    <span id="compass-text">N</span>
-  </div>
+  <button id="btn-show" class="panel icon-btn" aria-label="Show interface (H)" title="Show interface (H)" hidden>
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+  </button>
 
-  <!-- Application Logic -->
+  <script src="libs/three.min.js"></script>
+  <script src="libs/OrbitControls.js"></script>
+  <script src="annadel_data.js"></script>
   <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    }
+  </script>
 </body>
 </html>

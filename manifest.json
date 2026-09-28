@@ -4,8 +4,8 @@
   "description": "3D Topographical Map with LiDAR Forest Canopy & 27 Official Trails",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#0b0f14",
-  "theme_color": "#0b0f14",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
   "icons": [
     {
       "src": "favicon.ico",

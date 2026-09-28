@@ -28,8 +28,25 @@ MAX_ELONGATION = 4.0      # major/minor axis ratio of the crown footprint
 # Taller "trees" are high-voltage wires spanning the canyons on the park's east side
 # (all 60 m+ detections line up along that corridor); real crowns here top out in the 50s.
 MAX_TREE_HEIGHT_M = 62.0
+# Anything detected on the wires themselves (the corridor is kept clear of trees)
+POWERLINE_CLEARANCE_M = 15.0
 TILE = 2048
 MARGIN = 48
+
+
+def distance_to_powerline_m(lon, lat):
+    """Distance from each point to the traced transmission line (step 3), in metres."""
+    route = np.array(json.load(open(os.path.join(WORK, "powerline.json")))["route"])
+    mx = 8720.0 / (LON_MAX - LON_MIN)
+    my = 7774.0 / (LAT_MAX - LAT_MIN)
+    p = np.stack([lon * mx, lat * my], axis=1)
+    r = np.stack([route[:, 0] * mx, route[:, 1] * my], axis=1)
+    best = np.full(len(p), np.inf)
+    for a, b in zip(r[:-1], r[1:]):
+        ab = b - a
+        t = np.clip(((p - a) @ ab) / (ab @ ab), 0, 1)
+        best = np.minimum(best, np.linalg.norm(p - (a + t[:, None] * ab), axis=1))
+    return best
 
 
 def window_diameter(h):
@@ -111,6 +128,7 @@ def main():
     lon = LON_MIN + (rc[:, 1] + 0.5) / NX * (LON_MAX - LON_MIN)
     lat = LAT_MAX - (rc[:, 0] + 0.5) / NY * (LAT_MAX - LAT_MIN)
     inside = boundary.contains_points(np.stack([lon, lat], axis=1)) & (height <= MAX_TREE_HEIGHT_M)
+    inside &= distance_to_powerline_m(lon, lat) > POWERLINE_CLEARANCE_M
     lon, lat, height, radius = lon[inside], lat[inside], height[inside], radius[inside]
 
     # Species group from the Veg Map alliance raster (1024^2 over the same bounds):

@@ -158,7 +158,18 @@ def main():
     trees = {"count": int(len(rec)), "b64": base64.b64encode(rec.tobytes()).decode("ascii")}
 
     # Vector features: keep trails, the real lake outline and the boundary
+    # Keep trails that are on this map (OSM's "Cooper Ridge Trail" is on Taylor Mountain, off the west edge)
+    features["trails"] = [t for t in features["trails"]
+                          if any(0 <= p["u"] <= 1 and 0 <= p["v"] <= 1 for seg in t["lines"] for p in seg)]
     trail_stats(features["trails"], dem)
+    # Transmission line traced in step 3: wire profile and towers in map (u, v) + absolute elevation
+    pl = json.load(open(os.path.join(WORK, "powerline.json")))
+    to_uv = lambda lo, la: [round((lo - LON_MIN) / (LON_MAX - LON_MIN), 5), round((LAT_MAX - la) / (LAT_MAX - LAT_MIN), 5)]
+    powerline = {
+        "wire": [to_uv(lo, la) + [gz, wz] for lo, la, gz, wz in pl["profile"]],
+        "towers": [to_uv(lo, la) + [gz, h] for lo, la, gz, h in pl["towers"]],
+    }
+
     bundle = {
         "meta": {
             "source": "USGS 3DEP lidar CA_NorthernCA_1_B22 (flown 2022), 1 m ground and canopy models",
@@ -171,6 +182,7 @@ def main():
             "trails": features["trails"],
             "water_bodies": lake,
             "boundary": [{"u": p["u"], "v": p["v"]} for p in features["boundary"]],
+            "powerline": powerline,
         },
     }
     out = os.path.join(REPO, "annadel_data.js")

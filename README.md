@@ -19,11 +19,15 @@
   Hover any tree to see its height and crown size.
 - **1 m LiDAR terrain**: bare-earth model built from the same point cloud; the Shaded Relief and
   Topographic basemaps are baked from it at 1 m detail.
-- **27 Official Trails**: OpenStreetMap trail network with distance, elevation range and climb
-  (computed on the LiDAR terrain).
+- **26 Official Trails**: OpenStreetMap trail network with distance, elevation range and climb
+  (computed on the LiDAR terrain). Pick one from the Trails list to highlight it.
+- **Power line**: the transmission line across the east side, traced from the LiDAR with towers and
+  wires at their measured height.
 - **Multiple Basemap Styles**: satellite, topographic (40 ft contours), shaded relief, slope heatmap.
-- **Dynamic Lighting**: time-of-day sun angle and vertical exaggeration controls.
-- **Offline PWA** and mobile touch controls.
+- **Look-only map**: nothing on the map is clickable; the camera only moves when you drag it or press
+  a view button. Hover (or tap) for elevation, coordinates and the tree under the cursor.
+  Press **H** to hide the interface.
+- **Time-of-day sun** and vertical scale controls; offline-capable PWA with touch controls.
 
 See [`pipeline/lidar/README.md`](pipeline/lidar/README.md) for how the data is built and its known limits.
 
