@@ -27,7 +27,9 @@
 - **Look-only map**: nothing on the map is clickable; the camera only moves when you drag it or press
   a view button. Hover (or tap) for elevation, coordinates and the tree under the cursor.
   Press **H** to hide the interface.
-- **Time-of-day sun** and vertical scale controls; offline-capable PWA with touch controls.
+- **Real sunlight**: the sun's actual position over Annadel for winter, spring/fall or summer at any
+  time of day, with terrain shadows everywhere and tree shadows when you zoom in.
+- Vertical scale control; offline-capable PWA with touch controls.
 
 See [`pipeline/lidar/README.md`](pipeline/lidar/README.md) for how the data is built and its known limits.
 

@@ -1,5 +1,5 @@
 // Network-first: always show the latest version when online, fall back to the cache offline.
-const CACHE_NAME = 'annadel-3d-v3';
+const CACHE_NAME = 'annadel-3d-v4';
 const ASSETS = [
   './',
   'index.html',

@@ -94,6 +94,8 @@ h2 {
   display: grid; grid-template-columns: repeat(4, 1fr);
   background: var(--control); border-radius: 8px; padding: 2px; gap: 2px;
 }
+#panel .segmented + .slider { margin-top: 8px; }
+.segmented.three { grid-template-columns: repeat(3, 1fr); }
 .segmented button { padding: 6px 0; border-radius: 6px; font-size: 12px; color: var(--muted); }
 .segmented button:hover { color: var(--text); }
 .segmented button.active { background: #2a3342; color: var(--text); }

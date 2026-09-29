@@ -73,9 +73,18 @@
           <span>Vertical scale</span><output id="exag-val">1.5×</output>
           <input type="range" id="exag" min="1" max="3" step="0.1" value="1.5">
         </label>
+      </section>
+
+      <section>
+        <h2>Sunlight</h2>
+        <div class="segmented three" id="season">
+          <button data-season="winter">Winter</button>
+          <button data-season="equinox">Spring / Fall</button>
+          <button data-season="summer" class="active">Summer</button>
+        </div>
         <label class="slider">
-          <span>Sun</span><output id="sun-val"></output>
-          <input type="range" id="sun" min="0" max="100" step="1" value="62">
+          <span>Time of day</span><output id="sun-val"></output>
+          <input type="range" id="sun" min="0" max="100" step="1" value="68">
         </label>
       </section>
 

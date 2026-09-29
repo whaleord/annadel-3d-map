@@ -70,7 +70,9 @@
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.0;
+  // Proper colour management: textures are decoded from sRGB, lit in linear space, re-encoded on output
+  renderer.outputEncoding = THREE.sRGBEncoding;
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -93,26 +95,70 @@
   controls.addEventListener('change', requestRender);
 
   // ---------------------------------------------------------------------------
-  // Lighting and sun
+  // Lighting: the real sun over Annadel for a chosen season and time of day
   // ---------------------------------------------------------------------------
-  const ambient = new THREE.AmbientLight(0xffffff, 0.45);
-  const hemi = new THREE.HemisphereLight(0xcfe8ff, 0x1e293b, 0.35);
-  const sun = new THREE.DirectionalLight(0xfffaed, 1.25);
+  const linear = hex => new THREE.Color(hex).convertSRGBToLinear();
+  const BG = new THREE.Color(0x0d1117);  // clear colour is written as-is
+  const hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.5);
+  const sun = new THREE.DirectionalLight(0xffffff, 2.0);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  Object.assign(sun.shadow.camera, { near: 10, far: 320, left: -70, right: 70, top: 70, bottom: -70 });
-  sun.shadow.bias = -0.0005;
-  scene.add(ambient, hemi, sun);
+  const SHADOW_RES = IS_TOUCH ? 2048 : 4096;
+  sun.shadow.mapSize.set(SHADOW_RES, SHADOW_RES);
+  sun.shadow.bias = -0.0002;
+  scene.add(hemi, sun, sun.target);
+  const sunDir = new THREE.Vector3(0, 1, 0);
 
-  // 0 = 6:30 am (east) ... 100 = 7:30 pm (west)
+  const LAT = 38.425 * Math.PI / 180, LON = -122.62;
+  // Day of year and UTC offset (clock time incl. daylight saving)
+  const SEASONS = { winter: [355, -8], equinox: [80, -7], summer: [172, -7] };
+  let season = 'summer';
+
+  // NOAA solar position approximation. Returns elevation and azimuth (clockwise from north), radians.
+  function solarPosition(doy, hours, tz) {
+    const g = 2 * Math.PI / 365 * (doy - 1 + (hours - 12) / 24);
+    const eqTime = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g)
+      - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g));
+    const decl = 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g) - 0.006758 * Math.cos(2 * g)
+      + 0.000907 * Math.sin(2 * g) - 0.002697 * Math.cos(3 * g) + 0.00148 * Math.sin(3 * g);
+    const trueSolarMin = hours * 60 + eqTime + 4 * LON - 60 * tz;
+    const ha = (trueSolarMin / 4 - 180) * Math.PI / 180;
+    const el = Math.asin(Math.sin(LAT) * Math.sin(decl) + Math.cos(LAT) * Math.cos(decl) * Math.cos(ha));
+    const az = Math.atan2(Math.sin(ha), Math.cos(ha) * Math.sin(LAT) - Math.tan(decl) * Math.cos(LAT)) + Math.PI;
+    return { el, az };
+  }
+
+  function daylight(doy, tz) {
+    let rise = 12, set = 12;
+    for (let h = 12; h > 3; h -= 1 / 60) if (solarPosition(doy, h, tz).el > 0) rise = h;
+    for (let h = 12; h < 22; h += 1 / 60) if (solarPosition(doy, h, tz).el > 0) set = h;
+    return [rise, set];
+  }
+
+  const SKY_DAY = linear(0xbcd4ee), SKY_LOW = linear(0xf4b98a);
+  const GROUND_DAY = linear(0x4a4234), GROUND_LOW = linear(0x3a2c2a);
+  const BG_LOW = new THREE.Color(0x19141c);
+  const fogColor = new THREE.Color();
+
+  // p: 0 = just after sunrise ... 100 = just before sunset
   function setSun(p) {
-    const angle = (p / 100) * Math.PI;
-    sun.position.set(-Math.cos(angle) * 120, Math.sin(angle) * 80 + 20, 35);
-    const warm = Math.max(0, Math.abs(p - 50) / 50 - 0.45) / 0.55;  // 0 midday, 1 at the ends
-    sun.color.setRGB(1, 0.98 - 0.28 * warm, 0.93 - 0.48 * warm);
-    sun.intensity = 1.25 - 0.35 * warm;
-    const minutes = Math.round(390 + (p / 100) * 780);
-    const h = Math.floor(minutes / 60), m = minutes % 60;
+    const [doy, tz] = SEASONS[season];
+    const [rise, set] = daylight(doy, tz);
+    const hours = rise + 0.2 + (p / 100) * (set - rise - 0.4);
+    const { el, az } = solarPosition(doy, hours, tz);
+    sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el));
+
+    const elDeg = el * 180 / Math.PI;
+    const low = THREE.MathUtils.clamp(1 - (elDeg - 3) / 27, 0, 1);  // 1 near the horizon, 0 above 30 deg
+    sun.color.setRGB(1, 1 - 0.3 * low, 1 - 0.6 * low);
+    sun.intensity = 1.0 + 0.8 * Math.min(1, elDeg / 35);
+    hemi.color.copy(SKY_DAY).lerp(SKY_LOW, 0.55 * low);
+    hemi.groundColor.copy(GROUND_DAY).lerp(GROUND_LOW, low);
+    hemi.intensity = 0.55 + 0.15 * Math.min(1, elDeg / 30);
+    scene.background.copy(BG).lerp(BG_LOW, 0.7 * low);
+    scene.fog.color.copy(fogColor.copy(scene.background).convertSRGBToLinear());
+
+    const clock = Math.round(hours * 60);
+    const h = Math.floor(clock / 60), m = clock % 60;
     document.getElementById('sun-val').textContent =
       `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`;
     requestRender();
@@ -124,6 +170,7 @@
   const loader = new THREE.TextureLoader();
   function loadTexture(uri) {
     const t = loader.load(uri, requestRender);
+    t.encoding = THREE.sRGBEncoding;
     t.anisotropy = renderer.capabilities.getMaxAnisotropy();
     return t;
   }
@@ -155,6 +202,7 @@
     }
     ctx.putImageData(img, 0, 0);
     const tex = new THREE.CanvasTexture(canvas);
+    tex.encoding = THREE.sRGBEncoding;
     tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
     return tex;
   }
@@ -191,7 +239,7 @@
 
   // Base block under the terrain
   {
-    const mat = new THREE.MeshStandardMaterial({ color: 0x1a202b, roughness: 0.8, metalness: 0.2, side: THREE.DoubleSide });
+    const mat = new THREE.MeshStandardMaterial({ color: linear(0x1a202b), roughness: 0.8, metalness: 0.2, side: THREE.DoubleSide });
     const BOTTOM = -3.5;
     const wall = (fixedU, fixedV) => {
       const verts = [], idx = [];
@@ -222,7 +270,7 @@
     const g = new THREE.ShapeGeometry(shape);
     g.rotateX(-Math.PI / 2);
     const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
-      color: 0x1d6f95, roughness: 0.15, metalness: 0.2, transparent: true, opacity: 0.9
+      color: linear(0x1d6f95), roughness: 0.15, metalness: 0.2, transparent: true, opacity: 0.9
     }));
     mesh.position.y = baseY(wb.surface_m) + 0.01;
     mesh.receiveShadow = true;
@@ -236,7 +284,7 @@
     const pts = features.boundary.map(p => new THREE.Vector3(uToX(p.u), baseY(elevAt(p.u, p.v)) + 0.08, vToZ(p.v)));
     pts.push(pts[0].clone());
     const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
-      new THREE.LineDashedMaterial({ color: 0xf5c451, dashSize: 0.6, gapSize: 0.4, transparent: true, opacity: 0.8 }));
+      new THREE.LineDashedMaterial({ color: linear(0xf5c451), dashSize: 0.6, gapSize: 0.4, transparent: true, opacity: 0.8 }));
     line.computeLineDistances();
     boundaryGroup.add(line);
   }
@@ -254,7 +302,7 @@
   const trailsGroup = new THREE.Group();
   const trailLines = new Map();  // trail -> [THREE.Line]
   features.trails.forEach(tr => {
-    const mat = new THREE.LineBasicMaterial({ color: trailColor(tr), transparent: true, opacity: 0.9 });
+    const mat = new THREE.LineBasicMaterial({ color: linear(trailColor(tr)), transparent: true, opacity: 0.9 });
     const lines = tr.lines.map(seg => {
       const pts = seg.map(p => new THREE.Vector3(uToX(p.u), baseY(elevAt(p.u, p.v)) + 0.1, vToZ(p.v)));
       return new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat);
@@ -274,7 +322,7 @@
     }
     if (!trail) return;
     highlight = new THREE.Group();
-    const mat = new THREE.MeshBasicMaterial({ color: 0xfde047 });
+    const mat = new THREE.MeshBasicMaterial({ color: linear(0xfde047) });
     trail.lines.forEach(seg => {
       const pts = seg.map(p => new THREE.Vector3(uToX(p.u), baseY(elevAt(p.u, p.v)) + 0.12, vToZ(p.v)));
       if (pts.length < 2) return;
@@ -307,20 +355,32 @@
   const broadleafGeo = new THREE.IcosahedronGeometry(1, 0);
   broadleafGeo.scale(1, 0.4, 1);
   broadleafGeo.translate(0, 0.6, 0);
+  // Crowns are darker underneath, like light filtering through foliage
+  [coniferGeo, broadleafGeo].forEach(g => {
+    const pos = g.attributes.position;
+    g.computeBoundingBox();
+    const { min, max } = g.boundingBox;
+    const col = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      const k = 0.62 + 0.45 * (pos.getY(i) - min.y) / (max.y - min.y);
+      col[3 * i] = col[3 * i + 1] = col[3 * i + 2] = k;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  });
 
   const treesGroup = new THREE.Group();
   const byKind = [[], []];
   for (let i = 0; i < TREE_COUNT; i++) byKind[treeKind[i]].push(i);
-  const treeMeshes = [[coniferGeo, 0x1f5a36], [broadleafGeo, 0x5f7f2a]].map(([geo, base], k) => {
+  const treeMeshes = [[coniferGeo, 0x33704a], [broadleafGeo, 0x6f8f38]].map(([geo, base], k) => {
     const mesh = new THREE.InstancedMesh(geo,
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0, flatShading: true }),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0, flatShading: true, vertexColors: true }),
       Math.max(1, byKind[k].length));
     mesh.count = byKind[k].length;
     mesh.receiveShadow = true;
-    // A tree is ~one shadow-map texel at park scale, so trees don't cast
+    // Trees cast shadows only when zoomed in (see updateShadowFrame)
     mesh.castShadow = false;
     const c = new THREE.Color();
-    const baseColor = new THREE.Color(base);
+    const baseColor = linear(base);
     byKind[k].forEach((t, j) => {
       c.copy(baseColor).multiplyScalar(0.82 + 0.3 * (((t * 2654435761) >>> 0) % 1000) / 1000);
       mesh.setColorAt(j, c);
@@ -418,8 +478,8 @@
     return g;
   }
 
-  const towerMat = new THREE.LineBasicMaterial({ color: 0xaab2bd });
-  const wireMat = new THREE.LineBasicMaterial({ color: 0xd8dde4, transparent: true, opacity: 0.85 });
+  const towerMat = new THREE.LineBasicMaterial({ color: linear(0xaab2bd) });
+  const wireMat = new THREE.LineBasicMaterial({ color: linear(0xd8dde4), transparent: true, opacity: 0.85 });
 
   function buildPowerLine() {
     powerGroup.children.forEach(o => o.geometry.dispose());
@@ -670,6 +730,11 @@
 
   $('exag').addEventListener('input', e => setExaggeration(parseFloat(e.target.value), false));
   $('sun').addEventListener('input', e => setSun(parseInt(e.target.value, 10)));
+  document.querySelectorAll('#season button').forEach(b => b.addEventListener('click', () => {
+    season = b.dataset.season;
+    document.querySelectorAll('#season button').forEach(x => x.classList.toggle('active', x === b));
+    setSun(parseInt($('sun').value, 10));
+  }));
 
   document.querySelectorAll('.views button').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
 
@@ -762,6 +827,21 @@
     requestRender();
   });
 
+  // The shadow map covers the area around what you're looking at, so shadows sharpen as you zoom in
+  function updateShadowFrame() {
+    const dist = camera.position.distanceTo(controls.target);
+    const half = THREE.MathUtils.clamp(dist * 1.3, 5, 75);
+    const cam = sun.shadow.camera;
+    sun.target.position.copy(controls.target);
+    sun.position.copy(controls.target).addScaledVector(sunDir, 150);
+    cam.left = -half; cam.right = half; cam.top = half; cam.bottom = -half;
+    cam.near = 1; cam.far = 320;
+    cam.updateProjectionMatrix();
+    sun.shadow.normalBias = (2 * half / SHADOW_RES) * 1.5;
+    const treeShadows = dist < 30;
+    treeMeshes.forEach(m => { m.castShadow = treeShadows; });
+  }
+
   const compass = $('compass-needle');
   const dir = new THREE.Vector3();
   let firstFrame = true;
@@ -774,6 +854,7 @@
     }
     if (!needsRender) return;
     needsRender = false;
+    updateShadowFrame();
     renderer.render(scene, camera);
     updateLabels();
     camera.getWorldDirection(dir);
